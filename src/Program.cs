@@ -42,6 +42,12 @@ namespace prmonitor {
 					continue;
 				}
 
+				if (pr.Labels.Any (l => l.Name == "needs-author-action"))
+					continue;
+
+				if (!pr.Labels.Any (l => l.Name == "community-contribution"))
+					continue;
+
 				if (IsActivePR (client, pr, cutDate, out DateTime lastActivity)) {
 					++active;
 					continue;
@@ -197,6 +203,9 @@ namespace prmonitor {
 						continue;
 					}
 
+					if (!leadsCache.ContainsKey (l.Name))
+						continue;
+
 					label = l.Name;
 				}
 
@@ -207,11 +216,12 @@ namespace prmonitor {
 		static Dictionary<string, string> leadsCache = new Dictionary<string, string> (StringComparer.OrdinalIgnoreCase) {
 			{ "arch-loongarch64", "@mangod9" }, // TODO: Who should that be?
 			{ "os-linux", "@jeffhandley" }, // TODO: Who should that be?
+			{ "arch-riscv", "@JulieLeeMSFT" }, // TODO: Update in .md file
 		};
 
-		static Dictionary<string, string> leadsNames = new Dictionary<string, string> () {
+		static Dictionary<string, string> leadsNames = new Dictionary<string, string> (StringComparer.OrdinalIgnoreCase) {
 			{ "@agocke", "Andy Gocke" },
-			{ "@SamMonoRT", "Sam Patel" },
+			{ "@sammonort", "Sam Patel" },
 			{ "@ericstj", "Eric St. John" },
 			{ "@karelz", "Karel Zikmund" },
 			{ "@steveisok", "Steve Pfister" },
