@@ -7,15 +7,18 @@ using System.Net.Http;
 using System.IO;
 using System.Text;
 using System.Net;
+using System.Text.RegularExpressions;
 
 namespace prmonitor {
 	partial class Program {
-		const string org = "dotnet";
-		const string repo = "runtime";
-
-		static void Main (string[] args)
+		static async Task Main (string[] args)
 		{
-			PopulateLeadsArea ().Wait ();
+			const string org = "dotnet";
+			string repo = args[0] ?? "runtime";
+
+			Console.WriteLine ($"Starting PR Monitor for dotnet/{repo} repository");
+			
+			await PopulateLeadsArea (org, repo);
 
 			GitHubClient client = new GitHubClient (new ProductHeaderValue ("Octokit.Samples"));
 			client.Credentials = CreateCredentials ();
@@ -48,7 +51,7 @@ namespace prmonitor {
 				if (!pr.Labels.Any (l => l.Name == "community-contribution"))
 					continue;
 
-				if (IsActivePR (client, pr, cutDate, out DateTime lastActivity)) {
+				if (IsActivePR (org, repo, client, pr, cutDate, out DateTime lastActivity)) {
 					++active;
 					continue;
 				}
@@ -63,13 +66,13 @@ namespace prmonitor {
 
 			using (var input = new StreamReader (res!, Encoding.UTF8)) {
 				var text = input.ReadToEnd ().Replace ("##BODY##", sw.ToString ()).Replace ("##DATE##", DateTime.Today.ToString ("dd MMMM yyyy"));
-				File.WriteAllText ("output.html", text);
+				File.WriteAllText ($"output-{repo}.html", text);
 			}
 
 			return;
 		}
 
-		static bool IsActivePR (GitHubClient client, PullRequest pr, DateTime activityDate, out DateTime lastActivity)
+		static bool IsActivePR (string org, string repo, GitHubClient client, PullRequest pr, DateTime activityDate, out DateTime lastActivity)
 		{
 			// Was the PR created recently
 			if (pr.CreatedAt > activityDate) {
@@ -204,7 +207,10 @@ namespace prmonitor {
 					}
 
 					if (!leadsCache.ContainsKey (l.Name))
+					{
+						Console.WriteLine($"Missing lead mapping for {l.Name}");
 						continue;
+					}
 
 					label = l.Name;
 				}
@@ -216,6 +222,7 @@ namespace prmonitor {
 		static Dictionary<string, string> leadsCache = new Dictionary<string, string> (StringComparer.OrdinalIgnoreCase) {
 			{ "arch-loongarch64", "@mangod9" }, // TODO: Who should that be?
 			{ "os-linux", "@jeffhandley" }, // TODO: Who should that be?
+			{ "os-freebsd", "@jeffhandley" }, // TODO: Who should that be?
 			{ "arch-riscv", "@JulieLeeMSFT" }, // TODO: Update in .md file
 		};
 
@@ -241,20 +248,31 @@ namespace prmonitor {
 			{ "@MichaelSimons", "Michael Simons"},
 			{ "@adityamandaleeka", "Aditya Mandaleeka"},
 			{ "@David-Engel", "David Engel"},
+			{ "@vitek-karas", "Vitek Karas"},
+			{ "@joperezr", "Jose Perez Rodriguez" }
 		};
 
-		static async Task PopulateLeadsArea ()
+		static async Task PopulateLeadsArea (string org, string repo)
 		{
-			var http = new HttpClient ();
+			using var http = new HttpClient ();
 			var data = await http.GetStringAsync ($"https://raw.githubusercontent.com/{org}/{repo}/main/docs/area-owners.md");
+
 			PopulateLeadsCache ("area-");
 			PopulateLeadsCache ("arch-");
 			PopulateLeadsCache ("os-");
 
 			void PopulateLeadsCache (string prefix)
 			{
+				string dataFormat;
+				if (data.Contains("| **[" + prefix)) // aspnetcore repo style
+					dataFormat = "| **[" + prefix;
+				else if (data.Contains("| " + prefix)) // runtime repo style
+					dataFormat = "| " + prefix;
+				else
+					return;
+
 				bool first = true;
-				foreach (var line in data.Split ("| " + prefix)) {
+				foreach (var line in data.Split (dataFormat)) {
 					if (first) {
 						first = false;
 						continue;
@@ -267,13 +285,36 @@ namespace prmonitor {
 					}
 
 					var area = prefix + area_data[0].Trim ();
+					int idx = area.IndexOf (']');
+					if (idx != -1)
+						area = area.Substring (0, idx);
+					
 					var lead = area_data[1].Trim ();
-					if (leadsCache.ContainsKey (area)) {
+					if (lead.StartsWith ('['))
+						lead = ExtractStringsInBrackets(lead);
+
+					if (lead.Length == 0)
+					{
+						Console.WriteLine ($"Could not extract lead for '{area}'");
+						return;
+					}
+
+					if (!leadsCache.TryAdd (area, lead)) {
 						Console.WriteLine ($"Duplicate area lead for '{area}'");
 						continue;
 					}
+				}
 
-					leadsCache.Add (area, lead);
+				static string ExtractStringsInBrackets(string input)
+				{
+					MatchCollection matches = Regex.Matches(input, "\\[(.*?)\\]");
+					
+					foreach (Match match in matches)
+					{
+						return match.Groups[1].Value;
+					}
+					
+					return "";
 				}
 			}
 		}
